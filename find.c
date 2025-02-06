@@ -51,11 +51,11 @@ void find(char *path, char *look, int type_flag, char type_val, int inum_flag, i
 
     switch (targetinfo.type) {
     case T_FILE:
-        if ((!type_flag || type_val == 'f')) {  // 只检查 `-type f`
-            if ((!inum_flag) ||                      // 没有 `-inum`，默认通过
-                (inum_flag == 1 && targetinfo.ino == inum_val) ||  // `-inum N`
-                (inum_flag == 2 && targetinfo.ino > inum_val) ||   // `-inum +N`
-                (inum_flag == 3 && targetinfo.ino < inum_val)) {   // `-inum -N`
+        if ((!type_flag || type_val == 'f')) { 
+            if ((!inum_flag) ||                     
+                (inum_flag == 1 && targetinfo.ino == inum_val) || 
+                (inum_flag == 2 && targetinfo.ino > inum_val) ||   
+                (inum_flag == 3 && targetinfo.ino < inum_val)) {  
 
                 char *name = fmtname(path);
                 if (strcmp(look, name) == 0) {
@@ -69,11 +69,11 @@ void find(char *path, char *look, int type_flag, char type_val, int inum_flag, i
         break;
 
     case T_DIR:
-        if ((!type_flag || type_val == 'd')) {  // 只检查 `-type d`
+        if ((!type_flag || type_val == 'd')) {  
             if ((!inum_flag) || 
-                (inum_flag == 1 && targetinfo.ino == inum_val) ||  // `-inum N`
-                (inum_flag == 2 && targetinfo.ino > inum_val) ||   // `-inum +N`
-                (inum_flag == 3 && targetinfo.ino < inum_val)) {   // `-inum -N`
+                (inum_flag == 1 && targetinfo.ino == inum_val) || 
+                (inum_flag == 2 && targetinfo.ino > inum_val) ||   
+                (inum_flag == 3 && targetinfo.ino < inum_val)) {   
 
                 char *name = fmtname(path);
                 if (strcmp(look, name) == 0) {
