@@ -4,14 +4,20 @@
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        exit();
+        printf(2, "Usage: sleep <ticks>\n");
+        exit();  
     }
     int ticks = atoi(argv[1]);
 
+    
     if (ticks <= 0) {
-        exit();
+        printf(2, "sleep: Invalid number of ticks\n");
+        exit(); 
     }
+
     sleep(ticks);
-    exit();
+
+    exit();  
 }
+
 
