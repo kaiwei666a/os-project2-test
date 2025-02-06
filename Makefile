@@ -156,6 +156,15 @@ _forktest: forktest.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _forktest forktest.o ulib.o usys.o
 	$(OBJDUMP) -S _forktest > forktest.asm
 
+_find: find.c
+	$(CC) $(CFLAGS) -c find.c -o find.o
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _find find.o ulib.o usys.o printf.o
+	$(OBJDUMP) -S _find > find.asm
+
+
+
+
+
 mkfs: mkfs.c fs.h
 	gcc -Werror -Wall -o mkfs mkfs.c
 
@@ -183,6 +192,7 @@ UPROGS=\
 	_usertests\
 	_wc\
 	_zombie\
+	_find
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README OS611_example.txt OS611_EXAMPLE.txt $(UPROGS)
@@ -251,7 +261,7 @@ qemu-nox-gdb: fs.img xv6.img .gdbinit
 
 EXTRA=\
 	mkfs.c ulib.c user.h cat.c echo.c forktest.c grep.c kill.c\
-	ln.c ls.c mkdir.c rm.c stressfs.c usertests.c wc.c zombie.c\
+	ln.c ls.c mkdir.c rm.c stressfs.c usertests.c wc.c zombie.c find.c\
 	printf.c umalloc.c\
 	README dot-bochsrc *.pl toc.* runoff runoff1 runoff.list\
 	.gdbinit.tmpl gdbutil\
