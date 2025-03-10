@@ -88,7 +88,7 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-
+  p->runticks = 0;
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -532,3 +532,47 @@ procdump(void)
     cprintf("\n");
   }
 }
+
+
+
+int
+getrunticks(int pid)
+{
+  struct proc *p;
+  int found = 0;
+  int val = -1;
+
+  acquire(&ptable.lock);  
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid){
+
+      found = 1;
+
+      val = p->runticks;
+      break;
+    }
+  }
+  release(&ptable.lock);
+
+  if(!found) {
+
+    return -1;
+  }
+  return val;
+}
+
+
+int
+sys_ticks_run(void)
+{
+  int pid;
+
+  if(argint(0, &pid) < 0){
+    return -1;
+  }
+
+
+  return getrunticks(pid);
+}
+
+
