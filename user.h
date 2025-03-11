@@ -24,6 +24,8 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 int ticks_run(int pid);
+int set_tickets(int tickets);
+int get_tickets(int pid);
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -38,3 +40,4 @@ void* memset(void*, int, uint);
 void* malloc(uint);
 void free(void*);
 int atoi(const char*);
+

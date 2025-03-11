@@ -1,3 +1,22 @@
+
+SCHEDULER ?= DEFAULT
+
+CFLAGS += -Wall -Werror -O -fno-omit-frame-pointer
+
+ifeq ($(SCHEDULER),LOTTERY)
+CFLAGS += -DSCHEDULER_LOTTERY
+endif
+
+ifeq ($(SCHEDULER),PRIORITY)
+CFLAGS += -DSCHEDULER_PRIORITY
+endif
+
+ifeq ($(SCHEDULER),STCF)
+CFLAGS += -DSCHEDULER_STCF
+endif
+
+
+
 OBJS = \
 	bio.o\
 	console.o\
