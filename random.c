@@ -1,3 +1,4 @@
+#include "random.h"
 
 static unsigned int seed = 1;
 void srand(unsigned int s) {
