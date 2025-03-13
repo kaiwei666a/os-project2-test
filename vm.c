@@ -164,8 +164,8 @@ switchuvm(struct proc *p)
     panic("switchuvm: no pgdir");
 
   pushcli();
-  cprintf("switchuvm: Before update, CPU %d TSS: ss0=0x%x, esp0=0x%x\n",
-    cpuid(), mycpu()->ts.ss0, mycpu()->ts.esp0);
+  // cprintf("switchuvm: Before update, CPU %d TSS: ss0=0x%x, esp0=0x%x\n",
+  //   cpuid(), mycpu()->ts.ss0, mycpu()->ts.esp0);
   mycpu()->gdt[SEG_TSS] = SEG16(STS_T32A, &mycpu()->ts,
                                 sizeof(mycpu()->ts)-1, 0);
   mycpu()->gdt[SEG_TSS].s = 0;
@@ -174,12 +174,12 @@ switchuvm(struct proc *p)
   // setting IOPL=0 in eflags *and* iomb beyond the tss segment limit
   // forbids I/O instructions (e.g., inb and outb) from user space
   mycpu()->ts.iomb = (ushort) 0xFFFF;
-  cprintf("switchuvm: After update, CPU %d TSS: ss0=0x%x, esp0=0x%x\n",
-    cpuid(), mycpu()->ts.ss0, mycpu()->ts.esp0);
+  // cprintf("switchuvm: After update, CPU %d TSS: ss0=0x%x, esp0=0x%x\n",
+  //   cpuid(), mycpu()->ts.ss0, mycpu()->ts.esp0);
 
-// 也可以打印一下 GDT 中 TSS 描述符的关键字段
-cprintf("switchuvm: TSS descriptor: type=0x%x, s=%d\n",
-    mycpu()->gdt[SEG_TSS].type, mycpu()->gdt[SEG_TSS].s);
+
+// cprintf("switchuvm: TSS descriptor: type=0x%x, s=%d\n",
+//     mycpu()->gdt[SEG_TSS].type, mycpu()->gdt[SEG_TSS].s);
   ltr(SEG_TSS << 3);
   lcr3(V2P(p->pgdir));  // switch to process's address space
   popcli();

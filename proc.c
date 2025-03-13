@@ -125,16 +125,15 @@ allocproc(void)
 
   acquire(&ptable.lock);
 
-  // 在进程表中找到一个 UNUSED 进程
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED) {
-      cprintf("allocproc: Found UNUSED process slot, pid=%d\n", nextpid);
+      // cprintf("allocproc: Found UNUSED process slot, pid=%d\n", nextpid);
       goto found;
     }
   }
 
   release(&ptable.lock);
-  cprintf("allocproc: No UNUSED process found\n");
+  // cprintf("allocproc: No UNUSED process found\n");
   return 0;
 
 found:
@@ -142,41 +141,40 @@ found:
   p->pid = nextpid++;
   p->runticks = 0;
   p->tickets = DEFAULT_TICKETS;
-  cprintf("allocproc: Process allocated, pid=%d, state=EMBRYO\n", p->pid);
+  // cprintf("allocproc: Process allocated, pid=%d, state=EMBRYO\n", p->pid);
 
-  release(&ptable.lock);  // 释放锁，避免死锁
+  release(&ptable.lock);
 
-  // 分配内核栈
   if((p->kstack = kalloc()) == 0){
-    cprintf("allocproc: kalloc failed for process pid=%d\n", p->pid);
+    // cprintf("allocproc: kalloc failed for process pid=%d\n", p->pid);
     acquire(&ptable.lock);
-    p->state = UNUSED;  // 失败时恢复为 UNUSED
+    p->state = UNUSED; 
     release(&ptable.lock);
     return 0;
   }
-  cprintf("allocproc: kstack allocated at 0x%x for pid=%d\n", p->kstack, p->pid);
+  // cprintf("allocproc: kstack allocated at 0x%x for pid=%d\n", p->kstack, p->pid);
 
 
   sp = p->kstack + KSTACKSIZE;
 
-  // 预留 trapframe 空间
+
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
-  memset(p->tf, 0, sizeof *p->tf); // 清空 trapframe 避免脏数据
-  cprintf("allocproc: trapframe placed at 0x%x for pid=%d\n", p->tf, p->pid);
+  memset(p->tf, 0, sizeof *p->tf);
+  // cprintf("allocproc: trapframe placed at 0x%x for pid=%d\n", p->tf, p->pid);
 
-  // 预留返回地址空间
+
   sp -= 4;
   *(uint*)sp = (uint)trapret;
-  cprintf("allocproc: trapret address 0x%x stored at stack for pid=%d\n", sp, p->pid);
+  // cprintf("allocproc: trapret address 0x%x stored at stack for pid=%d\n", sp, p->pid);
 
-  // 分配 `context` 并初始化
+
   sp -= sizeof *p->context;
   p->context = (struct context*)sp;
-  memset(p->context, 0, sizeof *p->context); // 清空 context 避免未初始化数据
-  p->context->eip = (uint)forkret; // 设置入口点
-  cprintf("allocproc: context set, eip=0x%x, context at 0x%x for pid=%d\n",
-          p->context->eip, p->context, p->pid);
+  memset(p->context, 0, sizeof *p->context); 
+  p->context->eip = (uint)forkret; 
+  // cprintf("allocproc: context set, eip=0x%x, context at 0x%x for pid=%d\n",
+          // p->context->eip, p->context, p->pid);
 
   return p;
 }
@@ -446,20 +444,20 @@ void scheduler(void)
         acquire(&ptable.lock);
         total_tickets = 0;
 
-        // 检查所有 RUNNABLE 进程
-        cprintf("Scheduler: Checking for RUNNABLE processes...\n");
+
+        // cprintf("Scheduler: Checking for RUNNABLE processes...\n");
         int found_runnable = 0;
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
             if(p->state == RUNNABLE) {
-                cprintf("Scheduler: Found RUNNABLE process pid=%d, tickets=%d\n", p->pid, p->tickets);
+                // cprintf("Scheduler: Found RUNNABLE process pid=%d, tickets=%d\n", p->pid, p->tickets);
                 found_runnable = 1;
             }
         }
         if(!found_runnable) {
-            cprintf("Scheduler: No RUNNABLE processes found! Possible system lockup.\n");
+            // cprintf("Scheduler: No RUNNABLE processes found! Possible system lockup.\n");
         }
 
-        // 计算所有 RUNNABLE 进程的总票数
+
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
             if(p->state == RUNNABLE)
                 total_tickets += p->tickets;
@@ -485,14 +483,12 @@ void scheduler(void)
             continue;
         }
 
-        // 切换到选中的进程
         c->proc = p;
         switchuvm(p);
         p->state = RUNNING;
         swtch(&(c->scheduler), p->context);
         switchkvm();
 
-        // 进程运行结束后重置
         c->proc = 0;
         release(&ptable.lock);
     }
@@ -504,24 +500,24 @@ void scheduler(void)
         sti();
         acquire(&ptable.lock);
 
-        // 检查所有 RUNNABLE 进程
-        cprintf("Scheduler: Checking for RUNNABLE processes...\n");
+
+        // cprintf("Scheduler: Checking for RUNNABLE processes...\n");
         int found_runnable = 0;
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
             if(p->state == RUNNABLE) {
-                cprintf("Scheduler: Found RUNNABLE process pid=%d\n", p->pid);
+                // cprintf("Scheduler: Found RUNNABLE process pid=%d\n", p->pid);
                 found_runnable = 1;
             }
         }
         if(!found_runnable) {
-            cprintf("Scheduler: No RUNNABLE processes found! Possible system lockup.\n");
+            // cprintf("Scheduler: No RUNNABLE processes found! Possible system lockup.\n");
         }
 
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
             if(p->state != RUNNABLE)
                 continue;
 
-            // 切换到该进程
+
             c->proc = p;
             switchuvm(p);
             p->state = RUNNING;
