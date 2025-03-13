@@ -71,6 +71,51 @@ myproc(void) {
 // If found, change state to EMBRYO and initialize
 // state required to run in the kernel.
 // Otherwise return 0.
+// static struct proc*
+// allocproc(void)
+// {
+//   struct proc *p;
+//   char *sp;
+
+//   acquire(&ptable.lock);
+
+//   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+//     if(p->state == UNUSED)
+//       goto found;
+
+//   release(&ptable.lock);
+//   return 0;
+
+// found:
+//   p->state = EMBRYO;
+//   p->pid = nextpid++;
+//   p->runticks = 0;
+//   p->tickets = DEFAULT_TICKETS;
+//   release(&ptable.lock);
+
+//   // Allocate kernel stack.
+//   if((p->kstack = kalloc()) == 0){
+//     p->state = UNUSED;
+//     return 0;
+//   }
+//   sp = p->kstack + KSTACKSIZE;
+
+//   // Leave room for trap frame.
+//   sp -= sizeof *p->tf;
+//   p->tf = (struct trapframe*)sp;
+
+//   // Set up new context to start executing at forkret,
+//   // which returns to trapret.
+//   sp -= 4;
+//   *(uint*)sp = (uint)trapret;
+
+//   sp -= sizeof *p->context;
+//   p->context = (struct context*)sp;
+//   memset(p->context, 0, sizeof *p->context);
+//   p->context->eip = (uint)forkret;
+
+//   return p;
+// }
 static struct proc*
 allocproc(void)
 {
@@ -79,11 +124,12 @@ allocproc(void)
 
   acquire(&ptable.lock);
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED)
       goto found;
-
+  }
   release(&ptable.lock);
+  cprintf("allocproc: No UNUSED process found\n");
   return 0;
 
 found:
@@ -91,31 +137,39 @@ found:
   p->pid = nextpid++;
   p->runticks = 0;
   p->tickets = DEFAULT_TICKETS;
+  cprintf("allocproc: Process allocated, pid=%d, state=EMBRYO\n", p->pid);
   release(&ptable.lock);
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
+    cprintf("allocproc: kalloc failed for process pid=%d\n", p->pid);
     p->state = UNUSED;
     return 0;
   }
+  cprintf("allocproc: kstack allocated at 0x%x for pid=%d\n", p->kstack, p->pid);
   sp = p->kstack + KSTACKSIZE;
 
   // Leave room for trap frame.
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
+  cprintf("allocproc: trapframe placed at 0x%x for pid=%d\n", p->tf, p->pid);
 
   // Set up new context to start executing at forkret,
   // which returns to trapret.
   sp -= 4;
   *(uint*)sp = (uint)trapret;
+  cprintf("allocproc: trapret address 0x%x stored at stack for pid=%d\n", sp, p->pid);
 
   sp -= sizeof *p->context;
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
+  cprintf("allocproc: context set, eip=0x%x, context at 0x%x for pid=%d\n",
+          p->context->eip, p->context, p->pid);
 
   return p;
 }
+
 
 //PAGEBREAK: 32
 // Set up first user process.
@@ -154,6 +208,9 @@ userinit(void)
 
   release(&ptable.lock);
 }
+
+
+
 
 // Grow current process's memory by n bytes.
 // Return 0 on success, -1 on failure.
@@ -408,83 +465,119 @@ wait(void)
 // }
 
 
-
-void
-scheduler(void)
+void scheduler(void)
 {
 #ifdef SCHEDULER_LOTTERY
-struct proc *p;
-struct cpu *c = mycpu(); 
-int intena;
-int total_tickets;
-int winning_ticket;
+    struct proc *p;
+    struct cpu *c = mycpu(); 
+    int intena;
+    int total_tickets;
+    int winning_ticket;
 
-c->proc = 0;  
+    c->proc = 0;  
 
-for(;;){
-  sti(); 
+    for(;;){
+        sti(); 
 
-  acquire(&ptable.lock);
-  total_tickets = 0;
+        acquire(&ptable.lock);
+        total_tickets = 0;
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->state == RUNNABLE){
-      total_tickets += p->tickets;
-    }
-  }
 
-  if(total_tickets > 0){
-    winning_ticket = get_random(0, total_tickets);
-    int current_count = 0;
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
-      current_count += p->tickets;
-      if(current_count > winning_ticket){
-        c->proc = p;
-        break;
+        cprintf("Scheduler: Checking for RUNNABLE processes...\n");
+        int found_runnable = 0;
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+            if(p->state == RUNNABLE){
+                cprintf("Scheduler: Found RUNNABLE process pid=%d, tickets=%d\n", p->pid, p->tickets);
+                found_runnable = 1;
+            }
+        }
+        if(!found_runnable){
+            cprintf("Scheduler: No RUNNABLE processes found! Possible system lockup.\n");
+        }
+
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+            if(p->state == RUNNABLE){
+                total_tickets += p->tickets;
+            }
+        }
+
+        if(total_tickets > 0){
+          winning_ticket = get_random(0, total_tickets);
+          int current_count = 0;
+          for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+              if(p->state != RUNNABLE)
+                  continue;
+              current_count += p->tickets;
+              if(current_count > winning_ticket){
+                  c->proc = p;
+                  break;
+              }
+          }
+      } else {
+          release(&ptable.lock);
+          continue;
       }
-    }
-  } else {
-    release(&ptable.lock);
-    continue;
-  }
-  if(c->proc == 0){
-    release(&ptable.lock);
-    continue;
-  }
-
-  p = c->proc;
-  p->state = RUNNING;
-  intena = c->intena;
-  swtch(&c->scheduler, p->context);
-  c->intena = intena;
-  c->proc = 0;
-
-  release(&ptable.lock);
-}
-#else
-  struct proc *p;
-  struct cpu *c = mycpu();
-  int intena;
-
-  for(;;){
-    sti();
-    acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
+      if (c->proc == 0) {
+        cprintf("WARNING: No valid process selected, CPU might be idling.\n");
+        release(&ptable.lock);
         continue;
-      c->proc = p;
+      }
+  
+      p = c->proc;
+      
+      // 在切换之前调用 switchuvm() 更新 TSS 和 CR3
+      switchuvm(p);
+      cprintf("switchuvm: Process %d kstack=0x%x, tf=0x%x\n", p->pid, p->kstack, p->tf);
+
       p->state = RUNNING;
+      cprintf("Scheduler: Switching to process %d, context=0x%x, esp=0x%x\n",
+        p->pid, p->context, p->tf->esp);
       intena = c->intena;
       swtch(&c->scheduler, p->context);
+      // 当进程切换回来，恢复 kernel page table
+      switchkvm();
       c->intena = intena;
       c->proc = 0;
+  
+      release(&ptable.lock);
     }
-    release(&ptable.lock);
-  }
+#else
+    struct proc *p;
+    struct cpu *c = mycpu();
+    int intena;
+
+    for(;;){
+        sti();
+        acquire(&ptable.lock);
+
+        // 🔹【添加】检查 RUNNABLE 进程是否存在
+        cprintf("Scheduler: Checking for RUNNABLE processes...\n");
+        int found_runnable = 0;
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+            if(p->state == RUNNABLE){
+                cprintf("Scheduler: Found RUNNABLE process pid=%d\n", p->pid);
+                found_runnable = 1;
+            }
+        }
+        if(!found_runnable){
+            cprintf("Scheduler: No RUNNABLE processes found! Possible system lockup.\n");
+        }
+
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+            if(p->state != RUNNABLE)
+                continue;
+            c->proc = p;
+            p->state = RUNNING;
+            intena = c->intena;
+            swtch(&c->scheduler, p->context);
+            c->intena = intena;
+            c->proc = 0;
+        }
+        release(&ptable.lock);
+    }
 #endif
 }
+
 
 
 
