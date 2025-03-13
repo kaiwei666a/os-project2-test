@@ -89,3 +89,10 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int sys_job_position(void) {
+  int pid;
+  if (argint(0, &pid) < 0)  // Get PID argument
+      return -1;
+  return job_position(pid);  // Call function in `proc.c`
+}

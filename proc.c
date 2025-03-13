@@ -7,6 +7,9 @@
 #include "proc.h"
 #include "spinlock.h"
 #include "random.h"
+extern int uptime(void);
+
+
 
 
 struct {
@@ -19,6 +22,8 @@ static struct proc *initproc;
 int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
+
+
 
 static void wakeup1(void *chan);
 
@@ -293,9 +298,75 @@ fork(void)
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait() to find out it exited.
-void
-exit(void)
-{
+// void
+// exit(void)
+// {
+//   struct proc *curproc = myproc();
+//   struct proc *prev = 0;
+//     struct proc *curr = ptable.head;
+
+//     acquire(&ptable.lock);
+
+//     // Remove process from queue
+//     while (curr) {
+//         if (curr == myproc()) {
+//             if (prev) {
+//                 prev->next = curr->next;
+//             } else {
+//                 ptable.head = curr->next;
+//             }
+//             if (curr == ptable.tail) {
+//                 ptable.tail = prev;
+//             }
+//             break;
+//         }
+//         prev = curr;
+//         curr = curr->next;
+//     }
+
+//     release(&ptable.lock);
+
+//   struct proc *p;
+//   int fd;
+
+//   if(curproc == initproc)
+//     panic("init exiting");
+
+//   // Close all open files.
+//   for(fd = 0; fd < NOFILE; fd++){
+//     if(curproc->ofile[fd]){
+//       fileclose(curproc->ofile[fd]);
+//       curproc->ofile[fd] = 0;
+//     }
+//   }
+
+//   begin_op();
+//   iput(curproc->cwd);
+//   end_op();
+//   curproc->cwd = 0;
+
+//   acquire(&ptable.lock);
+
+//   // Parent might be sleeping in wait().
+//   wakeup1(curproc->parent);
+
+//   // Pass abandoned children to init.
+//   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+//     if(p->parent == curproc){
+//       p->parent = initproc;
+//       if(p->state == ZOMBIE)
+//         wakeup1(initproc);
+//     }
+//   }
+
+//   // Jump into the scheduler, never to return.
+//   curproc->state = ZOMBIE;
+//   sched();
+//   panic("zombie exit");
+// }
+
+
+void exit(void) {
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
@@ -330,11 +401,12 @@ exit(void)
     }
   }
 
-  // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
   sched();
   panic("zombie exit");
 }
+
+
 
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
@@ -436,6 +508,7 @@ void scheduler(void)
     int total_tickets;
     int winning_ticket;
 
+
     c->proc = 0;
 
     for(;;) {
@@ -492,43 +565,75 @@ void scheduler(void)
         c->proc = 0;
         release(&ptable.lock);
     }
-#else
-    struct proc *p;
-    struct cpu *c = mycpu();
+    #elif defined(SCHEDULER_FIFO)
+  struct proc *p;
+  struct cpu *c = mycpu();
+  c->proc = 0;
 
-    for(;;) {
-        sti();
-        acquire(&ptable.lock);
+  for (;;) {
+      sti();
+      acquire(&ptable.lock);
+      //cprintf("incremented1\n");
+      // Get the first process in the queue
+      p = ptable.head;
+      //cprintf("incremented2\n");
+      if (p && p->state == RUNNABLE) {
+          // Dequeue the process
+          //ptable.head = p->next;
+          if (!ptable.head) ptable.tail = 0;  // If queue is empty, reset tail
+
+          c->proc = p;
+          switchuvm(p);
+          p->state = RUNNING;
 
 
-        // cprintf("Scheduler: Checking for RUNNABLE processes...\n");
-        int found_runnable = 0;
-        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-            if(p->state == RUNNABLE) {
-                // cprintf("Scheduler: Found RUNNABLE process pid=%d\n", p->pid);
-                found_runnable = 1;
+          //cprintf("FIFO: Running process %d (Arrival Time: %d)\n", p->pid, p->arrival_time);
+          
+          swtch(&(c->scheduler), p->context);  // Switch to process
+          switchkvm();
+          //cprintf("FIFO: Also Running process %d (Arrival Time: %d)\n", p->pid, p->arrival_time);
+          c->proc = 0;
+
+
+            if (p->state == ZOMBIE) {
+                cprintf("FIFO: Process %d exited, moving to next process.\n", p->pid);
             }
-        }
-        if(!found_runnable) {
-            // cprintf("Scheduler: No RUNNABLE processes found! Possible system lockup.\n");
-        }
-
-        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-            if(p->state != RUNNABLE)
-                continue;
-
-
-            c->proc = p;
-            switchuvm(p);
-            p->state = RUNNING;
-            swtch(&(c->scheduler), p->context);
-            switchkvm();
-            c->proc = 0;
-        }
-        release(&ptable.lock);
-    }
-#endif
+      }else if(p&&p->next&&p->next->state==RUNNABLE){
+              ptable.head = p->next;
+      }
+    release(&ptable.lock);
+    if (!ptable.head) {
+            cprintf("All processes finished. Restarting shell...\n");
+            userinit();  
+            cprintf("Shell restarted!\n");
+  }
 }
+#else
+struct proc *p;
+struct cpu *c = mycpu();
+c->proc = 0;
+
+for(;;) {
+    sti();
+    acquire(&ptable.lock);
+
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if(p->state != RUNNABLE)
+            continue;
+        c->proc = p;
+        switchuvm(p);
+        p->state = RUNNING;
+
+        swtch(&(c->scheduler), p->context);
+        switchkvm();
+
+        c->proc = 0;
+    }
+
+    release(&ptable.lock);
+}
+#endif
+  }
 
 
 
@@ -568,6 +673,7 @@ yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
   myproc()->state = RUNNABLE;
+  myproc()->enqueue_time = ticks;
   sched();
   release(&ptable.lock);
 }
@@ -641,8 +747,10 @@ wakeup1(void *chan)
   struct proc *p;
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
-      p->state = RUNNABLE;
+    if(p->state == SLEEPING && p->chan == chan){
+       p->state = RUNNABLE;
+       p->enqueue_time = ticks;
+    }
 }
 
 // Wake up all processes sleeping on chan.
@@ -798,5 +906,19 @@ sys_get_tickets(void)
   if(argint(0, &pid) < 0)
     return -1;
   return gettickets(pid);
+}
+
+
+int job_position(int pid) {
+  struct proc *p;
+  acquire(&ptable.lock);
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+      if (p->pid == pid) {
+          release(&ptable.lock);
+          return p->pid;  
+      }
+  }
+  release(&ptable.lock);
+  return -1;  
 }
 

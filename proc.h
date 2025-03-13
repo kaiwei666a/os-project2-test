@@ -51,7 +51,24 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   int tickets;
+  uint enqueue_time;
+
 };
+
+
+// // Process management functions
+// struct proc *myproc(void);
+// void exit(void);
+// int fork(void);
+// int growproc(int);
+// int kill(int);
+// int sleep(void*, struct spinlock*);
+// int wait(void);
+// void wakeup(void*);
+
+// // Job position function declaration
+// int job_position(int pid);
+
 
 // Process memory is laid out contiguously, low addresses first:
 //   text

@@ -1,19 +1,28 @@
 
 SCHEDULER ?= DEFAULT
 
+
 CFLAGS += -Wall -Werror -O -fno-omit-frame-pointer
 
 ifeq ($(SCHEDULER),LOTTERY)
 CFLAGS += -DSCHEDULER_LOTTERY
 endif
 
-ifeq ($(SCHEDULER),PRIORITY)
-CFLAGS += -DSCHEDULER_PRIORITY
+ifeq ($(SCHEDULER),FIFO)
+CFLAGS += -DSCHEDULER_FIFO
 endif
 
-ifeq ($(SCHEDULER),STCF)
-CFLAGS += -DSCHEDULER_STCF
+ifeq ($(SCHEDULER),DEFAULT)
+CFLAGS += -DSCHEDULER_DEFAULT
 endif
+
+
+all: kernel
+
+
+qemu: qemu-nox
+
+
 
 
 
