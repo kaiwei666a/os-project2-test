@@ -222,7 +222,10 @@ UPROGS=\
 	_find\
 	_test_ticks_run\
 	_scheduler_perf_test\
-	_generate_report
+	_generate_report\
+	_ticks_run_test\
+	_simple_scheduler_test\
+	_advanced_scheduler_test
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README OS611_example.txt OS611_EXAMPLE.txt $(UPROGS)

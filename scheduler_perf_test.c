@@ -291,41 +291,31 @@ void run_performance_test() {
     printf(1, "\nAll processes created, waiting for completion...\n");
     
     // Wait for all processes to complete and collect metrics
-    int wpid;
-    int completed = 0;
-    while(completed < 4) {
-        wpid = wait();
-        // Find which process completed
-        for(int i = 0; i < 4; i++) {
-            if(wpid == pids[i]) {
-                printf(1, "\nProcess %d (pid %d) completed\n", i, wpid);
-                calculate_metrics(wpid, &metrics[i]);
-                completed++;
-                break;
-            }
-        }
+    for(int i = 0; i < 4; i++) {
+        wait();
+        calculate_metrics(pids[i], &metrics[i]);
     }
     
-    // Print metrics for all processes with their PIDs
-    printf(1, "\nstressfs metrics (pid %d):\n", pids[0]);
+    // Print metrics for all processes
+    printf(1, "\nstressfs metrics:\n");
     printf(1, "Turnaround time: %d\n", metrics[0].turnaround_time);
     printf(1, "Response time: %d\n", metrics[0].response_time);
     printf(1, "CPU time: %d\n", metrics[0].cpu_time);
     printf(1, "Waiting time: %d\n", metrics[0].waiting_time);
     
-    printf(1, "\nfind metrics (pid %d):\n", pids[1]);
+    printf(1, "\nfind metrics:\n");
     printf(1, "Turnaround time: %d\n", metrics[1].turnaround_time);
     printf(1, "Response time: %d\n", metrics[1].response_time);
     printf(1, "CPU time: %d\n", metrics[1].cpu_time);
     printf(1, "Waiting time: %d\n", metrics[1].waiting_time);
     
-    printf(1, "\ncat|uniq metrics (pid %d):\n", pids[2]);
+    printf(1, "\ncat|uniq metrics:\n");
     printf(1, "Turnaround time: %d\n", metrics[2].turnaround_time);
     printf(1, "Response time: %d\n", metrics[2].response_time);
     printf(1, "CPU time: %d\n", metrics[2].cpu_time);
     printf(1, "Waiting time: %d\n", metrics[2].waiting_time);
     
-    printf(1, "\nCustom workload metrics (pid %d):\n", pids[3]);
+    printf(1, "\nCustom workload metrics:\n");
     printf(1, "Turnaround time: %d\n", metrics[3].turnaround_time);
     printf(1, "Response time: %d\n", metrics[3].response_time);
     printf(1, "CPU time: %d\n", metrics[3].cpu_time);

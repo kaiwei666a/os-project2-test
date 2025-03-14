@@ -20,6 +20,7 @@ struct {
 // Performance metrics storage
 struct PerfData perf_data[NPROC];
 struct spinlock perf_lock;  // Lock for accessing perf_data
+uint last_completion_time;  // Track the last completion time
 
 static struct proc *initproc;
 
@@ -36,6 +37,7 @@ pinit(void)
 {
   initlock(&ptable.lock, "ptable");
   initlock(&perf_lock, "perfdata");
+  last_completion_time = 0;  // Initialize last completion time
   
   // Initialize performance data
   for(int i = 0; i < NPROC; i++) {
@@ -140,15 +142,11 @@ allocproc(void)
 
   acquire(&ptable.lock);
 
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->state == UNUSED) {
-      // cprintf("allocproc: Found UNUSED process slot, pid=%d\n", nextpid);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+    if(p->state == UNUSED)
       goto found;
-    }
-  }
 
   release(&ptable.lock);
-  // cprintf("allocproc: No UNUSED process found\n");
   return 0;
 
 found:
@@ -156,48 +154,39 @@ found:
   p->pid = nextpid++;
   p->runticks = 0;
   p->tickets = DEFAULT_TICKETS;
+  
+  // Initialize performance metrics
+  acquire(&tickslock);
   p->creation_time = ticks;
-  p->start_time = 0;
+  p->start_time = p->creation_time;  // Set start time to creation time
+  release(&tickslock);
   p->completion_time = 0;
   p->total_run_time = 0;
   p->total_ready_time = 0;
-  p->total_sleep_time = 0;
-  p->num_run = 0;
-  p->priority = 0;
-  // cprintf("allocproc: Process allocated, pid=%d, state=EMBRYO\n", p->pid);
-
+  p->enqueue_time = 0;
+  
   release(&ptable.lock);
 
+  // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
-    // cprintf("allocproc: kalloc failed for process pid=%d\n", p->pid);
-    acquire(&ptable.lock);
-    p->state = UNUSED; 
-    release(&ptable.lock);
+    p->state = UNUSED;
     return 0;
   }
-  // cprintf("allocproc: kstack allocated at 0x%x for pid=%d\n", p->kstack, p->pid);
-
-
   sp = p->kstack + KSTACKSIZE;
 
-
+  // Leave room for trap frame.
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
-  memset(p->tf, 0, sizeof *p->tf);
-  // cprintf("allocproc: trapframe placed at 0x%x for pid=%d\n", p->tf, p->pid);
 
-
+  // Set up new context to start executing at forkret,
+  // which returns to trapret.
   sp -= 4;
   *(uint*)sp = (uint)trapret;
-  // cprintf("allocproc: trapret address 0x%x stored at stack for pid=%d\n", sp, p->pid);
-
 
   sp -= sizeof *p->context;
   p->context = (struct context*)sp;
-  memset(p->context, 0, sizeof *p->context); 
-  p->context->eip = (uint)forkret; 
-  // cprintf("allocproc: context set, eip=0x%x, context at 0x%x for pid=%d\n",
-          // p->context->eip, p->context, p->pid);
+  memset(p->context, 0, sizeof *p->context);
+  p->context->eip = (uint)forkret;
 
   return p;
 }
@@ -291,6 +280,7 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  np->tickets = curproc->tickets;  // Copy parent's tickets to child
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -305,7 +295,9 @@ fork(void)
   pid = np->pid;
 
   acquire(&ptable.lock);
+  acquire(&tickslock);
   np->enqueue_time = ticks;  // Record when process enters ready queue
+  release(&tickslock);
   np->state = RUNNABLE;
   release(&ptable.lock);
 
@@ -539,7 +531,9 @@ void scheduler(void)
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
             // Update completion time for any process that's done
             if((p->state == ZOMBIE || p->state == UNUSED) && p->completion_time <= p->creation_time) {
+                acquire(&tickslock);
                 p->completion_time = ticks;
+                release(&tickslock);
                 if(p->total_run_time == 0) {
                     p->total_run_time = 1;  // Ensure minimum run time
                 }
@@ -561,8 +555,10 @@ void scheduler(void)
             }
             // Update ready time for RUNNABLE processes
             if(p->state == RUNNABLE && p->enqueue_time > 0) {
+                acquire(&tickslock);
                 p->total_ready_time += ticks - p->enqueue_time;
                 p->enqueue_time = ticks;  // Reset enqueue time to prevent double counting
+                release(&tickslock);
             }
         }
 
@@ -588,21 +584,23 @@ void scheduler(void)
                 p->state = RUNNING;
 
                 // Update metrics before running
-                if(p->start_time == 0 && p->total_run_time == 0) {
-                    // Only set start_time if this is the first time the process runs
-                    p->start_time = ticks;
-                }
                 if(p->enqueue_time > 0) {
+                    acquire(&tickslock);
                     p->total_ready_time += ticks - p->enqueue_time;
                     p->enqueue_time = 0;  // Clear enqueue time while running
+                    release(&tickslock);
                 }
+                acquire(&tickslock);
                 uint run_start = ticks;
+                release(&tickslock);
 
                 swtch(&(c->scheduler), p->context);
                 switchkvm();
 
                 // Update metrics after running
+                acquire(&tickslock);
                 uint run_time = ticks - run_start;
+                release(&tickslock);
                 // Always count at least 1 tick for any process that gets CPU time
                 if(run_time == 0) {
                     run_time = 1;
@@ -612,7 +610,10 @@ void scheduler(void)
 
                 // Update completion time if process is done
                 if(p->state == ZOMBIE || p->state == UNUSED) {
+                    acquire(&tickslock);
                     p->completion_time = ticks;
+                    last_completion_time = p->completion_time;  // Update last completion time
+                    release(&tickslock);
                     // Store metrics immediately
                     acquire(&perf_lock);
                     for(int i = 0; i < NPROC; i++) {
@@ -652,20 +653,27 @@ void scheduler(void)
 
             // Update metrics
             if (p->enqueue_time > 0) {
+                acquire(&tickslock);
                 p->total_ready_time += ticks - p->enqueue_time;
+                release(&tickslock);
             }
-            if(p->start_time == 0) {
-                p->start_time = ticks;
-            }
+            acquire(&tickslock);
             uint run_start = ticks;
+            release(&tickslock);
 
             swtch(&(c->scheduler), p->context);
             switchkvm();
 
+            acquire(&tickslock);
             p->total_run_time += ticks - run_start;
+            release(&tickslock);
             c->proc = 0;
 
             if (p->state == ZOMBIE) {
+                acquire(&tickslock);
+                p->completion_time = ticks;
+                last_completion_time = p->completion_time;
+                release(&tickslock);
                 if(p->next && p->next->state == RUNNABLE) {
                     ptable.head = p->next;
                 }
@@ -692,19 +700,32 @@ void scheduler(void)
             switchuvm(p);
             p->state = RUNNING;
             
+            // Set start time to last completion time if not already set
+            if (p->start_time == 0) {
+                p->start_time = last_completion_time;
+            }
+
             // Update metrics
             if (p->enqueue_time > 0) {
                 p->total_ready_time += ticks - p->enqueue_time;
             }
-            if(p->start_time == 0) {
-                p->start_time = ticks;
-            }
+            acquire(&tickslock);
             uint run_start = ticks;
+            release(&tickslock);
             
             swtch(&(c->scheduler), p->context);
             switchkvm();
             
             p->total_run_time += ticks - run_start;
+
+            // Update completion time if process is done
+            if(p->state == ZOMBIE || p->state == UNUSED) {
+                acquire(&tickslock);
+                p->completion_time = ticks;
+                last_completion_time = p->completion_time;  // Update last completion time
+                release(&tickslock);
+            }
+            
             c->proc = 0;
         }
         release(&ptable.lock);
@@ -751,7 +772,9 @@ yield(void)
   struct proc *p = myproc();
   acquire(&ptable.lock);
   p->state = RUNNABLE;
+  acquire(&tickslock);
   p->enqueue_time = ticks;  // Record when process enters ready queue
+  release(&tickslock);
   sched();
   release(&ptable.lock);
 }
