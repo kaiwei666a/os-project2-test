@@ -96,3 +96,48 @@ int sys_job_position(void) {
       return -1;
   return job_position(pid);  // Call function in `proc.c`
 }
+
+int
+sys_get_creation_time(void)
+{
+  int pid;
+  if(argint(0, &pid) < 0)
+    return -1;
+  return get_creation_time(pid);
+}
+
+int
+sys_get_start_time(void)
+{
+  int pid;
+  if(argint(0, &pid) < 0)
+    return -1;
+  return get_start_time(pid);
+}
+
+int
+sys_get_completion_time(void)
+{
+  int pid;
+  if(argint(0, &pid) < 0)
+    return -1;
+  return get_completion_time(pid);
+}
+
+int
+sys_get_total_run_time(void)
+{
+  int pid;
+  if(argint(0, &pid) < 0)
+    return -1;
+  return get_total_run_time(pid);
+}
+
+int
+sys_get_total_ready_time(void)
+{
+  int pid;
+  if(argint(0, &pid) < 0)
+    return -1;
+  return get_total_ready_time(pid);
+}

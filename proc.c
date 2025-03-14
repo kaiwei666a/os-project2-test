@@ -17,6 +17,10 @@ struct {
   struct proc proc[NPROC];
 } ptable;
 
+// Performance metrics storage
+struct PerfData perf_data[NPROC];
+struct spinlock perf_lock;  // Lock for accessing perf_data
+
 static struct proc *initproc;
 
 int nextpid = 1;
@@ -31,6 +35,12 @@ void
 pinit(void)
 {
   initlock(&ptable.lock, "ptable");
+  initlock(&perf_lock, "perfdata");
+  
+  // Initialize performance data
+  for(int i = 0; i < NPROC; i++) {
+    perf_data[i].valid = 0;
+  }
 }
 
 // Must be called with interrupts disabled
@@ -146,6 +156,14 @@ found:
   p->pid = nextpid++;
   p->runticks = 0;
   p->tickets = DEFAULT_TICKETS;
+  p->creation_time = ticks;
+  p->start_time = 0;
+  p->completion_time = 0;
+  p->total_run_time = 0;
+  p->total_ready_time = 0;
+  p->total_sleep_time = 0;
+  p->num_run = 0;
+  p->priority = 0;
   // cprintf("allocproc: Process allocated, pid=%d, state=EMBRYO\n", p->pid);
 
   release(&ptable.lock);
@@ -298,81 +316,45 @@ fork(void)
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait() to find out it exited.
-// void
-// exit(void)
-// {
-//   struct proc *curproc = myproc();
-//   struct proc *prev = 0;
-//     struct proc *curr = ptable.head;
-
-//     acquire(&ptable.lock);
-
-//     // Remove process from queue
-//     while (curr) {
-//         if (curr == myproc()) {
-//             if (prev) {
-//                 prev->next = curr->next;
-//             } else {
-//                 ptable.head = curr->next;
-//             }
-//             if (curr == ptable.tail) {
-//                 ptable.tail = prev;
-//             }
-//             break;
-//         }
-//         prev = curr;
-//         curr = curr->next;
-//     }
-
-//     release(&ptable.lock);
-
-//   struct proc *p;
-//   int fd;
-
-//   if(curproc == initproc)
-//     panic("init exiting");
-
-//   // Close all open files.
-//   for(fd = 0; fd < NOFILE; fd++){
-//     if(curproc->ofile[fd]){
-//       fileclose(curproc->ofile[fd]);
-//       curproc->ofile[fd] = 0;
-//     }
-//   }
-
-//   begin_op();
-//   iput(curproc->cwd);
-//   end_op();
-//   curproc->cwd = 0;
-
-//   acquire(&ptable.lock);
-
-//   // Parent might be sleeping in wait().
-//   wakeup1(curproc->parent);
-
-//   // Pass abandoned children to init.
-//   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-//     if(p->parent == curproc){
-//       p->parent = initproc;
-//       if(p->state == ZOMBIE)
-//         wakeup1(initproc);
-//     }
-//   }
-
-//   // Jump into the scheduler, never to return.
-//   curproc->state = ZOMBIE;
-//   sched();
-//   panic("zombie exit");
-// }
-
-
-void exit(void) {
+void
+exit(void)
+{
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
 
   if(curproc == initproc)
     panic("init exiting");
+
+  // Finalize all metrics before doing anything else
+  acquire(&ptable.lock);
+  if(curproc->completion_time <= curproc->creation_time) {
+    curproc->completion_time = ticks;  // Set completion time if not already set properly
+  }
+  if(curproc->total_run_time == 0) {
+    curproc->total_run_time = 1;  // Ensure minimum run time
+  }
+  if(curproc->enqueue_time > 0) {
+    curproc->total_ready_time += ticks - curproc->enqueue_time;
+    curproc->enqueue_time = 0;
+  }
+
+  // Store metrics in historical data
+  acquire(&perf_lock);
+  for(int i = 0; i < NPROC; i++) {
+    if(!perf_data[i].valid) {
+      perf_data[i].pid = curproc->pid;
+      perf_data[i].creation_time = curproc->creation_time;
+      perf_data[i].start_time = curproc->start_time;
+      perf_data[i].completion_time = curproc->completion_time;
+      perf_data[i].total_run_time = curproc->total_run_time;
+      perf_data[i].total_ready_time = curproc->total_ready_time;
+      perf_data[i].valid = 1;
+      break;
+    }
+  }
+  release(&perf_lock);
+  release(&ptable.lock);
 
   // Close all open files.
   for(fd = 0; fd < NOFILE; fd++){
@@ -401,6 +383,7 @@ void exit(void) {
     }
   }
 
+  // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
   sched();
   panic("zombie exit");
@@ -428,6 +411,43 @@ wait(void)
       if(p->state == ZOMBIE){
         // Found one.
         pid = p->pid;
+        
+        // Ensure all metrics are finalized
+        if(p->completion_time <= p->creation_time) {
+          p->completion_time = ticks;
+        }
+        if(p->total_run_time == 0) {
+          p->total_run_time = 1;  // Ensure minimum run time
+        }
+        if(p->enqueue_time > 0) {
+          p->total_ready_time += ticks - p->enqueue_time;
+          p->enqueue_time = 0;
+        }
+        
+        // Store performance metrics before cleanup
+        acquire(&perf_lock);
+        int stored = 0;
+        for(int i = 0; i < NPROC; i++) {
+          if(!perf_data[i].valid) {
+            perf_data[i].pid = p->pid;
+            perf_data[i].creation_time = p->creation_time;
+            perf_data[i].start_time = p->start_time;
+            perf_data[i].completion_time = p->completion_time;
+            perf_data[i].total_run_time = p->total_run_time;
+            perf_data[i].total_ready_time = p->total_ready_time;
+            perf_data[i].valid = 1;
+            stored = 1;
+            break;
+          }
+        }
+        release(&perf_lock);
+
+        // If we couldn't store metrics, wait and try again
+        if(!stored) {
+          continue;
+        }
+
+        // Clean up process
         kfree(p->kstack);
         p->kstack = 0;
         freevm(p->pgdir);
@@ -436,6 +456,7 @@ wait(void)
         p->name[0] = 0;
         p->killed = 0;
         p->state = UNUSED;
+
         release(&ptable.lock);
         return pid;
       }
@@ -508,28 +529,43 @@ void scheduler(void)
     int total_tickets;
     int winning_ticket;
 
-
     c->proc = 0;
 
     for(;;) {
         sti();
-
         acquire(&ptable.lock);
         total_tickets = 0;
 
-
-        // cprintf("Scheduler: Checking for RUNNABLE processes...\n");
-        int found_runnable = 0;
-        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-            if(p->state == RUNNABLE) {
-                // cprintf("Scheduler: Found RUNNABLE process pid=%d, tickets=%d\n", p->pid, p->tickets);
-                found_runnable = 1;
+        // Update metrics for all processes first
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+            // Update completion time for any process that's done
+            if((p->state == ZOMBIE || p->state == UNUSED) && p->completion_time <= p->creation_time) {
+                p->completion_time = ticks;
+                if(p->total_run_time == 0) {
+                    p->total_run_time = 1;  // Ensure minimum run time
+                }
+                // Store metrics immediately for completed processes
+                acquire(&perf_lock);
+                for(int i = 0; i < NPROC; i++) {
+                    if(!perf_data[i].valid) {
+                        perf_data[i].pid = p->pid;
+                        perf_data[i].creation_time = p->creation_time;
+                        perf_data[i].start_time = p->start_time;
+                        perf_data[i].completion_time = p->completion_time;
+                        perf_data[i].total_run_time = p->total_run_time;
+                        perf_data[i].total_ready_time = p->total_ready_time;
+                        perf_data[i].valid = 1;
+                        break;
+                    }
+                }
+                release(&perf_lock);
+            }
+            // Update ready time for RUNNABLE processes
+            if(p->state == RUNNABLE && p->enqueue_time > 0) {
+                p->total_ready_time += ticks - p->enqueue_time;
+                p->enqueue_time = ticks;  // Reset enqueue time to prevent double counting
             }
         }
-        if(!found_runnable) {
-            // cprintf("Scheduler: No RUNNABLE processes found! Possible system lockup.\n");
-        }
-
 
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
             if(p->state == RUNNABLE)
@@ -546,92 +582,133 @@ void scheduler(void)
                 if(current_count > winning_ticket)
                     break;
             }
-        } else {
-            release(&ptable.lock);
-            continue;
+
+            if(p->state == RUNNABLE) {
+                c->proc = p;
+                switchuvm(p);
+                p->state = RUNNING;
+
+                // Update metrics before running
+                if(p->start_time == 0) {
+                    p->start_time = ticks;
+                }
+                if(p->enqueue_time > 0) {
+                    p->total_ready_time += ticks - p->enqueue_time;
+                    p->enqueue_time = 0;  // Clear enqueue time while running
+                }
+                uint run_start = ticks;
+
+                swtch(&(c->scheduler), p->context);
+                switchkvm();
+
+                // Update metrics after running
+                uint run_time = ticks - run_start;
+                // Always count at least 1 tick for any process that gets CPU time
+                if(run_time == 0) {
+                    run_time = 1;
+                }
+                p->total_run_time += run_time;
+                p->runticks += run_time;
+
+                // Update completion time if process is done
+                if(p->state == ZOMBIE || p->state == UNUSED) {
+                    p->completion_time = ticks;
+                    // Store metrics immediately
+                    acquire(&perf_lock);
+                    for(int i = 0; i < NPROC; i++) {
+                        if(!perf_data[i].valid) {
+                            perf_data[i].pid = p->pid;
+                            perf_data[i].creation_time = p->creation_time;
+                            perf_data[i].start_time = p->start_time;
+                            perf_data[i].completion_time = p->completion_time;
+                            perf_data[i].total_run_time = p->total_run_time;
+                            perf_data[i].total_ready_time = p->total_ready_time;
+                            perf_data[i].valid = 1;
+                            break;
+                        }
+                    }
+                    release(&perf_lock);
+                }
+                
+                c->proc = 0;
+            }
         }
-
-        if(p->state != RUNNABLE) {
-            release(&ptable.lock);
-            continue;
-        }
-
-        c->proc = p;
-        switchuvm(p);
-        p->state = RUNNING;
-        swtch(&(c->scheduler), p->context);
-        switchkvm();
-
-        c->proc = 0;
         release(&ptable.lock);
     }
-    #elif defined(SCHEDULER_FIFO)
-  struct proc *p;
-  struct cpu *c = mycpu();
-  c->proc = 0;
+#elif defined(SCHEDULER_FIFO)
+    struct proc *p;
+    struct cpu *c = mycpu();
+    c->proc = 0;
 
-  for (;;) {
-      sti();
-      acquire(&ptable.lock);
-      //cprintf("incremented1\n");
-      // Get the first process in the queue
-      p = ptable.head;
-      //cprintf("incremented2\n");
-      if (p && p->state == RUNNABLE) {
-          // Dequeue the process
-          //ptable.head = p->next;
-          if (!ptable.head) ptable.tail = 0;  // If queue is empty, reset tail
+    for (;;) {
+        sti();
+        acquire(&ptable.lock);
+        p = ptable.head;
+        
+        if (p && p->state == RUNNABLE) {
+            c->proc = p;
+            switchuvm(p);
+            p->state = RUNNING;
 
-          c->proc = p;
-          switchuvm(p);
-          p->state = RUNNING;
+            // Update metrics
+            if (p->enqueue_time > 0) {
+                p->total_ready_time += ticks - p->enqueue_time;
+            }
+            if(p->start_time == 0) {
+                p->start_time = ticks;
+            }
+            uint run_start = ticks;
 
+            swtch(&(c->scheduler), p->context);
+            switchkvm();
 
-          //cprintf("FIFO: Running process %d (Arrival Time: %d)\n", p->pid, p->arrival_time);
-          
-          swtch(&(c->scheduler), p->context);  // Switch to process
-          switchkvm();
-          //cprintf("FIFO: Also Running process %d (Arrival Time: %d)\n", p->pid, p->arrival_time);
-          c->proc = 0;
-
+            p->total_run_time += ticks - run_start;
+            c->proc = 0;
 
             if (p->state == ZOMBIE) {
-                cprintf("FIFO: Process %d exited, moving to next process.\n", p->pid);
+                if(p->next && p->next->state == RUNNABLE) {
+                    ptable.head = p->next;
+                }
             }
-      }else if(p&&p->next&&p->next->state==RUNNABLE){
-              ptable.head = p->next;
-      }
-    release(&ptable.lock);
-    if (!ptable.head) {
-            cprintf("All processes finished. Restarting shell...\n");
-            userinit();  
-            cprintf("Shell restarted!\n");
-  }
-}
-#else
-struct proc *p;
-struct cpu *c = mycpu();
-c->proc = 0;
-
-for(;;) {
-    sti();
-    acquire(&ptable.lock);
-
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-        if(p->state != RUNNABLE)
-            continue;
-        c->proc = p;
-        switchuvm(p);
-        p->state = RUNNING;
-
-        swtch(&(c->scheduler), p->context);
-        switchkvm();
-
-        c->proc = 0;
+        } else if(p && p->next && p->next->state == RUNNABLE) {
+            ptable.head = p->next;
+        }
+        release(&ptable.lock);
     }
+#else
+    struct proc *p;
+    struct cpu *c = mycpu();
+    c->proc = 0;
 
-    release(&ptable.lock);
-}
+    for(;;) {
+        sti();
+        acquire(&ptable.lock);
+
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+            if(p->state != RUNNABLE)
+                continue;
+
+            c->proc = p;
+            switchuvm(p);
+            p->state = RUNNING;
+            
+            // Update metrics
+            if (p->enqueue_time > 0) {
+                p->total_ready_time += ticks - p->enqueue_time;
+            }
+            if(p->start_time == 0) {
+                p->start_time = ticks;
+            }
+            uint run_start = ticks;
+            
+            swtch(&(c->scheduler), p->context);
+            switchkvm();
+            
+            p->total_run_time += ticks - run_start;
+            c->proc = 0;
+        }
+        release(&ptable.lock);
+    }
 #endif
   }
 
@@ -671,9 +748,13 @@ sched(void)
 void
 yield(void)
 {
-  acquire(&ptable.lock);  //DOC: yieldlock
-  myproc()->state = RUNNABLE;
-  myproc()->enqueue_time = ticks;
+  struct proc *p = myproc();
+  acquire(&ptable.lock);
+  p->state = RUNNABLE;
+  p->enqueue_time = ticks;  // Record when process enters ready queue
+  if(p->start_time == 0) {  // If this is the first time being scheduled
+    p->start_time = ticks;
+  }
   sched();
   release(&ptable.lock);
 }
@@ -722,6 +803,13 @@ sleep(void *chan, struct spinlock *lk)
     acquire(&ptable.lock);  //DOC: sleeplock1
     release(lk);
   }
+
+  // Update metrics before sleeping
+  if(p->enqueue_time > 0) {
+    p->total_ready_time += ticks - p->enqueue_time;
+    p->enqueue_time = 0;
+  }
+  
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
@@ -920,5 +1008,155 @@ int job_position(int pid) {
   }
   release(&ptable.lock);
   return -1;  
+}
+
+int
+get_creation_time(int pid)
+{
+  struct proc *p;
+  int creation_time = -1;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->pid == pid) {
+      creation_time = p->creation_time;
+      break;
+    }
+  }
+  release(&ptable.lock);
+  
+  if(creation_time == -1) {
+    // Look in historical data
+    acquire(&perf_lock);
+    for(int i = 0; i < NPROC; i++) {
+      if(perf_data[i].valid && perf_data[i].pid == pid) {
+        creation_time = perf_data[i].creation_time;
+        break;
+      }
+    }
+    release(&perf_lock);
+  }
+  
+  return creation_time;
+}
+
+int
+get_start_time(int pid)
+{
+  struct proc *p;
+  int start_time = -1;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->pid == pid) {
+      start_time = p->start_time;
+      break;
+    }
+  }
+  release(&ptable.lock);
+  
+  if(start_time == -1) {
+    // Look in historical data
+    acquire(&perf_lock);
+    for(int i = 0; i < NPROC; i++) {
+      if(perf_data[i].valid && perf_data[i].pid == pid) {
+        start_time = perf_data[i].start_time;
+        break;
+      }
+    }
+    release(&perf_lock);
+  }
+  
+  return start_time;
+}
+
+int
+get_completion_time(int pid)
+{
+  struct proc *p;
+  int completion_time = -1;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->pid == pid) {
+      completion_time = p->completion_time;
+      break;
+    }
+  }
+  release(&ptable.lock);
+  
+  if(completion_time == -1) {
+    // Look in historical data
+    acquire(&perf_lock);
+    for(int i = 0; i < NPROC; i++) {
+      if(perf_data[i].valid && perf_data[i].pid == pid) {
+        completion_time = perf_data[i].completion_time;
+        break;
+      }
+    }
+    release(&perf_lock);
+  }
+  
+  return completion_time;
+}
+
+int
+get_total_run_time(int pid)
+{
+  struct proc *p;
+  int total_run_time = -1;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->pid == pid) {
+      total_run_time = p->total_run_time;
+      break;
+    }
+  }
+  release(&ptable.lock);
+  
+  if(total_run_time == -1) {
+    // Look in historical data
+    acquire(&perf_lock);
+    for(int i = 0; i < NPROC; i++) {
+      if(perf_data[i].valid && perf_data[i].pid == pid) {
+        total_run_time = perf_data[i].total_run_time;
+        break;
+      }
+    }
+    release(&perf_lock);
+  }
+  
+  return total_run_time;
+}
+
+int
+get_total_ready_time(int pid)
+{
+  struct proc *p;
+  int total_ready_time = -1;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->pid == pid) {
+      total_ready_time = p->total_ready_time;
+      break;
+    }
+  }
+  release(&ptable.lock);
+  
+  if(total_ready_time == -1) {
+    // Look in historical data
+    acquire(&perf_lock);
+    for(int i = 0; i < NPROC; i++) {
+      if(perf_data[i].valid && perf_data[i].pid == pid) {
+        total_ready_time = perf_data[i].total_ready_time;
+        break;
+      }
+    }
+    release(&perf_lock);
+  }
+  
+  return total_ready_time;
 }
 

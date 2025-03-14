@@ -24,3 +24,9 @@
 #define SYS_set_tickets 23
 #define SYS_get_tickets  24
 #define SYS_job_position 25
+#define SYS_get_creation_time   26
+#define SYS_get_start_time      27
+#define SYS_get_completion_time 28
+#define SYS_get_total_run_time  29
+#define SYS_get_total_ready_time 30
+

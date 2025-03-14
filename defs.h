@@ -121,6 +121,11 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+int             get_creation_time(int pid);
+int             get_start_time(int pid);
+int             get_completion_time(int pid);
+int             get_total_run_time(int pid);
+int             get_total_ready_time(int pid);
 
 // swtch.S
 void            swtch(struct context**, struct context*);

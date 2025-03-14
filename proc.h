@@ -34,6 +34,19 @@ struct context {
 
 enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+#define NPROC        64  // maximum number of processes
+
+// Performance metrics structure
+struct PerfData {
+  int pid;
+  int creation_time;
+  int start_time;
+  int completion_time;
+  int total_run_time;
+  int total_ready_time;
+  int valid;  // Flag to indicate if this entry contains valid data
+};
+
 // Per-process state
 struct proc {
   uint sz;                     // Size of process memory (bytes)
@@ -41,20 +54,31 @@ struct proc {
   char *kstack;                // Bottom of kernel stack for this process
   enum procstate state;        // Process state
   int pid;                     // Process ID
-  struct proc *parent;         // Parent process
-  struct trapframe *tf;        // Trap frame for current syscall
-  struct context *context;     // swtch() here to run process
-  void *chan;                  // If non-zero, sleeping on chan
-  int killed;
-  int runticks;           
-  struct file *ofile[NOFILE];  // Open files
-  struct inode *cwd;           // Current directory
-  char name[16];               // Process name (debugging)
-  int tickets;
-  uint enqueue_time;
-
+  struct proc *parent;          // Parent process
+  struct trapframe *tf;         // Trap frame for current syscall
+  struct context *context;      // swtch() here to run process
+  void *chan;                   // If non-zero, sleeping on chan
+  int killed;                   // If non-zero, have been killed
+  int runticks;                 // Number of ticks this process has run
+  struct file *ofile[NOFILE];   // Open files
+  struct inode *cwd;             // Current directory
+  char name[16];                 // Process name (debugging)
+  int tickets;                   // Number of tickets for lottery scheduling
+  int enqueue_time;              // Time when process was last enqueued
+  
+  // Performance metrics
+  int creation_time;            // Time when process was created
+  int start_time;                // Time when process first started running
+  int completion_time;            // Time when process completed
+  int total_run_time;             // Total time spent running
+  int total_ready_time;           // Total time spent ready
+  int total_sleep_time;            // Total time spent sleeping
+  int num_run;                     // Number of times scheduled
+  int priority;                     // Priority level
 };
 
+// Performance metrics storage
+extern struct PerfData perf_data[NPROC];
 
 // // Process management functions
 // struct proc *myproc(void);

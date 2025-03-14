@@ -1,4 +1,3 @@
-
 SCHEDULER ?= DEFAULT
 
 
@@ -221,7 +220,9 @@ UPROGS=\
 	_wc\
 	_zombie\
 	_find\
-	_test_ticks_run
+	_test_ticks_run\
+	_scheduler_perf_test\
+	_generate_report
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README OS611_example.txt OS611_EXAMPLE.txt $(UPROGS)
@@ -325,3 +326,13 @@ tar:
 	(cd /tmp; tar cf - xv6) | gzip >xv6-rev10.tar.gz  # the next one will be 10 (9/17)
 
 .PHONY: dist-test dist
+
+_scheduler_perf_test: scheduler_perf_test.o $(ULIB)
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _scheduler_perf_test scheduler_perf_test.o $(ULIB)
+	$(OBJDUMP) -S _scheduler_perf_test > scheduler_perf_test.asm
+	$(OBJDUMP) -t _scheduler_perf_test | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > scheduler_perf_test.sym
+
+_generate_report: generate_report.o $(ULIB)
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o _generate_report generate_report.o $(ULIB)
+	$(OBJDUMP) -S _generate_report > generate_report.asm
+	$(OBJDUMP) -t _generate_report | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > generate_report.sym
