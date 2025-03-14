@@ -19,12 +19,24 @@ void calculate_metrics(int pid, struct PerfMetrics *metrics) {
     int run_time = get_total_run_time(pid);
     int ready_time = get_total_ready_time(pid);
 
+    // If completion time is 0, use current time
+    if (completion == 0) {
+        completion = uptime();
+        printf(1, "WARNING: Completion time was 0, using current time: %d\n", completion);
+    }
+
+    printf(1, "\n=============================\n");
     printf(1, "Process %d raw metrics:\n", pid);
     printf(1, "Creation time: %d\n", creation);
     printf(1, "Start time: %d\n", start);
     printf(1, "Completion time: %d\n", completion);
     printf(1, "Run time: %d\n", run_time);
     printf(1, "Ready time: %d\n", ready_time);
+    
+    if (completion < creation) {
+        printf(1, "WARNING: Completion time is less than creation time!\n");
+    }
+    printf(1, "=============================\n");
 
     // Only calculate metrics if we have valid times
     if (creation >= 0 && completion >= 0) {
@@ -190,20 +202,134 @@ void run_custom_workload() {
 // Function to run all workloads and collect metrics
 void run_performance_test() {
     int start_time = uptime();
+    int pids[4];  // Array to store process IDs
+    struct PerfMetrics metrics[4];  // Array to store metrics
     
     printf(1, "Starting performance test...\n");
+    printf(1, "Creating all processes...\n");
     
-    printf(1, "\nRunning stressfs...\n");
-    run_stressfs();
+    // Create stressfs process
+    pids[0] = fork();
+    if (pids[0] < 0) {
+        printf(1, "Fork failed\n");
+        exit();
+    }
+    if (pids[0] == 0) {
+        // Child process
+        char *args[] = {"stressfs", 0};
+        exec("stressfs", args);
+        printf(1, "exec stressfs failed\n");
+        exit();
+    }
     
-    printf(1, "\nRunning find . -name...\n");
-    run_find();
+    // Create find process
+    pids[1] = fork();
+    if (pids[1] < 0) {
+        printf(1, "Fork failed\n");
+        exit();
+    }
+    if (pids[1] == 0) {
+        // Child process
+        char *args[] = {"find", ".", "-name", "find", 0};
+        exec("find", args);
+        printf(1, "exec find failed\n");
+        exit();
+    }
     
-    printf(1, "\nRunning cat README | uniq...\n");
-    run_cat_uniq();
+    // Create cat|uniq process
+    pids[2] = fork();
+    if (pids[2] < 0) {
+        printf(1, "Fork failed\n");
+        exit();
+    }
+    if (pids[2] == 0) {
+        // Child process
+        int p[2];
+        pipe(p);
+        
+        if (fork() == 0) {
+            close(1);
+            dup(p[1]);
+            close(p[0]);
+            close(p[1]);
+            char *args[] = {"cat", "README", 0};
+            exec("cat", args);
+            printf(1, "exec cat failed\n");
+            exit();
+        }
+        
+        close(0);
+        dup(p[0]);
+        close(p[0]);
+        close(p[1]);
+        char *args[] = {"uniq", 0};
+        exec("uniq", args);
+        printf(1, "exec uniq failed\n");
+        exit();
+    }
     
-    printf(1, "\nRunning echo hello > test.tx...\n");
-    run_custom_workload();
+    // Create echo process
+    pids[3] = fork();
+    if (pids[3] < 0) {
+        printf(1, "Fork failed\n");
+        exit();
+    }
+    if (pids[3] == 0) {
+        // Child process
+        close(1);  // Close standard output
+        int fd = open("test.txt", O_CREATE|O_WRONLY);
+        if(fd < 0) {
+            printf(2, "Failed to create test.txt\n");
+            exit();
+        }
+        char *args[] = {"echo", "hello", 0};
+        exec("echo", args);
+        printf(2, "exec echo failed\n");
+        exit();
+    }
+    
+    printf(1, "\nAll processes created, waiting for completion...\n");
+    
+    // Wait for all processes to complete and collect metrics
+    int wpid;
+    int completed = 0;
+    while(completed < 4) {
+        wpid = wait();
+        // Find which process completed
+        for(int i = 0; i < 4; i++) {
+            if(wpid == pids[i]) {
+                printf(1, "\nProcess %d (pid %d) completed\n", i, wpid);
+                calculate_metrics(wpid, &metrics[i]);
+                completed++;
+                break;
+            }
+        }
+    }
+    
+    // Print metrics for all processes with their PIDs
+    printf(1, "\nstressfs metrics (pid %d):\n", pids[0]);
+    printf(1, "Turnaround time: %d\n", metrics[0].turnaround_time);
+    printf(1, "Response time: %d\n", metrics[0].response_time);
+    printf(1, "CPU time: %d\n", metrics[0].cpu_time);
+    printf(1, "Waiting time: %d\n", metrics[0].waiting_time);
+    
+    printf(1, "\nfind metrics (pid %d):\n", pids[1]);
+    printf(1, "Turnaround time: %d\n", metrics[1].turnaround_time);
+    printf(1, "Response time: %d\n", metrics[1].response_time);
+    printf(1, "CPU time: %d\n", metrics[1].cpu_time);
+    printf(1, "Waiting time: %d\n", metrics[1].waiting_time);
+    
+    printf(1, "\ncat|uniq metrics (pid %d):\n", pids[2]);
+    printf(1, "Turnaround time: %d\n", metrics[2].turnaround_time);
+    printf(1, "Response time: %d\n", metrics[2].response_time);
+    printf(1, "CPU time: %d\n", metrics[2].cpu_time);
+    printf(1, "Waiting time: %d\n", metrics[2].waiting_time);
+    
+    printf(1, "\nCustom workload metrics (pid %d):\n", pids[3]);
+    printf(1, "Turnaround time: %d\n", metrics[3].turnaround_time);
+    printf(1, "Response time: %d\n", metrics[3].response_time);
+    printf(1, "CPU time: %d\n", metrics[3].cpu_time);
+    printf(1, "Waiting time: %d\n", metrics[3].waiting_time);
     
     int total_ticks = uptime() - start_time;
     printf(1, "\nTotal test time: %d ticks\n", total_ticks);
