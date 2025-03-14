@@ -305,9 +305,8 @@ fork(void)
   pid = np->pid;
 
   acquire(&ptable.lock);
-
+  np->enqueue_time = ticks;  // Record when process enters ready queue
   np->state = RUNNABLE;
-
   release(&ptable.lock);
 
   return pid;
@@ -589,7 +588,8 @@ void scheduler(void)
                 p->state = RUNNING;
 
                 // Update metrics before running
-                if(p->start_time == 0) {
+                if(p->start_time == 0 && p->total_run_time == 0) {
+                    // Only set start_time if this is the first time the process runs
                     p->start_time = ticks;
                 }
                 if(p->enqueue_time > 0) {
@@ -752,9 +752,6 @@ yield(void)
   acquire(&ptable.lock);
   p->state = RUNNABLE;
   p->enqueue_time = ticks;  // Record when process enters ready queue
-  if(p->start_time == 0) {  // If this is the first time being scheduled
-    p->start_time = ticks;
-  }
   sched();
   release(&ptable.lock);
 }

@@ -82,7 +82,7 @@ void run_find() {
     }
     if (pid == 0) {
         // Child process
-        char *args[] = {"find", ".", 0};
+        char *args[] = {"find", ".", "-name", "find", 0};
         exec("find", args);
         printf(1, "exec find failed\n");
         exit();
@@ -151,7 +151,7 @@ void run_cat_uniq() {
     printf(1, "Waiting time: %d\n", metrics.waiting_time);
 }
 
-// Custom workload: CPU intensive calculation
+// Custom workload: echo hello > test.txt
 void run_custom_workload() {
     int pid = fork();
     if (pid < 0) {
@@ -160,14 +160,15 @@ void run_custom_workload() {
     }
     if (pid == 0) {
         // Child process
-        int i, j;
-        int result = 0;
-        for (i = 0; i < 1000; i++) {
-            for (j = 0; j < 1000; j++) {
-                result += (i * j) % 17;
-            }
+        close(1);  // Close standard output
+        int fd = open("test.txt", O_CREATE|O_WRONLY);
+        if(fd < 0) {
+            printf(2, "Failed to create test.txt\n");
+            exit();
         }
-        printf(1, "Custom workload result: %d\n", result);
+        char *args[] = {"echo", "hello", 0};
+        exec("echo", args);
+        printf(2, "exec echo failed\n");
         exit();
     }
     
@@ -195,13 +196,13 @@ void run_performance_test() {
     printf(1, "\nRunning stressfs...\n");
     run_stressfs();
     
-    printf(1, "\nRunning find...\n");
+    printf(1, "\nRunning find . -name...\n");
     run_find();
     
     printf(1, "\nRunning cat README | uniq...\n");
     run_cat_uniq();
     
-    printf(1, "\nRunning custom workload...\n");
+    printf(1, "\nRunning echo hello > test.tx...\n");
     run_custom_workload();
     
     int total_ticks = uptime() - start_time;
