@@ -7,9 +7,7 @@
 #include "proc.h"
 #include "spinlock.h"
 #include "random.h"
-
-extern uint uptime(void);
-
+extern int uptime(void);
 
 
 
@@ -134,11 +132,13 @@ allocproc(void)
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED) {
+      // cprintf("allocproc: Found UNUSED process slot, pid=%d\n", nextpid);
       goto found;
     }
   }
 
   release(&ptable.lock);
+  // cprintf("allocproc: No UNUSED process found\n");
   return 0;
 
 found:
@@ -146,35 +146,40 @@ found:
   p->pid = nextpid++;
   p->runticks = 0;
   p->tickets = DEFAULT_TICKETS;
-  p->creation_time = ticks;
-  p->start_time = 0;
-  p->completion_time = 0;
-  p->total_run_time = 0;
-  p->total_ready_time = 0;
-  p->total_sleep_time = 0;
-  p->responded = 0;
-  p->next = 0;
+  // cprintf("allocproc: Process allocated, pid=%d, state=EMBRYO\n", p->pid);
 
   release(&ptable.lock);
 
   if((p->kstack = kalloc()) == 0){
+    // cprintf("allocproc: kalloc failed for process pid=%d\n", p->pid);
     acquire(&ptable.lock);
-    p->state = UNUSED;
+    p->state = UNUSED; 
     release(&ptable.lock);
     return 0;
   }
+  // cprintf("allocproc: kstack allocated at 0x%x for pid=%d\n", p->kstack, p->pid);
+
+
   sp = p->kstack + KSTACKSIZE;
+
 
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
+  memset(p->tf, 0, sizeof *p->tf);
+  // cprintf("allocproc: trapframe placed at 0x%x for pid=%d\n", p->tf, p->pid);
+
 
   sp -= 4;
   *(uint*)sp = (uint)trapret;
+  // cprintf("allocproc: trapret address 0x%x stored at stack for pid=%d\n", sp, p->pid);
+
 
   sp -= sizeof *p->context;
   p->context = (struct context*)sp;
-  memset(p->context, 0, sizeof *p->context);
-  p->context->eip = (uint)forkret;
+  memset(p->context, 0, sizeof *p->context); 
+  p->context->eip = (uint)forkret; 
+  // cprintf("allocproc: context set, eip=0x%x, context at 0x%x for pid=%d\n",
+          // p->context->eip, p->context, p->pid);
 
   return p;
 }
@@ -293,9 +298,75 @@ fork(void)
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait() to find out it exited.
-void
-exit(void)
-{
+// void
+// exit(void)
+// {
+//   struct proc *curproc = myproc();
+//   struct proc *prev = 0;
+//     struct proc *curr = ptable.head;
+
+//     acquire(&ptable.lock);
+
+//     // Remove process from queue
+//     while (curr) {
+//         if (curr == myproc()) {
+//             if (prev) {
+//                 prev->next = curr->next;
+//             } else {
+//                 ptable.head = curr->next;
+//             }
+//             if (curr == ptable.tail) {
+//                 ptable.tail = prev;
+//             }
+//             break;
+//         }
+//         prev = curr;
+//         curr = curr->next;
+//     }
+
+//     release(&ptable.lock);
+
+//   struct proc *p;
+//   int fd;
+
+//   if(curproc == initproc)
+//     panic("init exiting");
+
+//   // Close all open files.
+//   for(fd = 0; fd < NOFILE; fd++){
+//     if(curproc->ofile[fd]){
+//       fileclose(curproc->ofile[fd]);
+//       curproc->ofile[fd] = 0;
+//     }
+//   }
+
+//   begin_op();
+//   iput(curproc->cwd);
+//   end_op();
+//   curproc->cwd = 0;
+
+//   acquire(&ptable.lock);
+
+//   // Parent might be sleeping in wait().
+//   wakeup1(curproc->parent);
+
+//   // Pass abandoned children to init.
+//   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+//     if(p->parent == curproc){
+//       p->parent = initproc;
+//       if(p->state == ZOMBIE)
+//         wakeup1(initproc);
+//     }
+//   }
+
+//   // Jump into the scheduler, never to return.
+//   curproc->state = ZOMBIE;
+//   sched();
+//   panic("zombie exit");
+// }
+
+
+void exit(void) {
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
@@ -318,9 +389,6 @@ exit(void)
 
   acquire(&ptable.lock);
 
-  // Record completion time
-  curproc->completion_time = ticks;
-
   // Parent might be sleeping in wait().
   wakeup1(curproc->parent);
 
@@ -333,7 +401,6 @@ exit(void)
     }
   }
 
-  // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
   sched();
   panic("zombie exit");
@@ -440,21 +507,30 @@ void scheduler(void)
     struct cpu *c = mycpu();
     int total_tickets;
     int winning_ticket;
+
+
     c->proc = 0;
 
     for(;;) {
         sti();
+
         acquire(&ptable.lock);
         total_tickets = 0;
 
-        // Update ready time for all RUNNABLE processes
-        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+
+        // cprintf("Scheduler: Checking for RUNNABLE processes...\n");
+        int found_runnable = 0;
+        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
             if(p->state == RUNNABLE) {
-                p->total_ready_time++;
+                // cprintf("Scheduler: Found RUNNABLE process pid=%d, tickets=%d\n", p->pid, p->tickets);
+                found_runnable = 1;
             }
         }
+        if(!found_runnable) {
+            // cprintf("Scheduler: No RUNNABLE processes found! Possible system lockup.\n");
+        }
 
-        // Calculate total tickets
+
         for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
             if(p->state == RUNNABLE)
                 total_tickets += p->tickets;
@@ -463,7 +539,6 @@ void scheduler(void)
         if(total_tickets > 0){
             winning_ticket = get_random(0, total_tickets);
             int current_count = 0;
-            
             for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
                 if(p->state != RUNNABLE)
                     continue;
@@ -471,103 +546,94 @@ void scheduler(void)
                 if(current_count > winning_ticket)
                     break;
             }
-
-            if(p->state == RUNNABLE) {
-                if (!p->responded) {
-                    p->start_time = ticks;
-                    p->responded = 1;
-                }
-                
-                c->proc = p;
-                switchuvm(p);
-                p->state = RUNNING;
-                p->total_run_time++;
-                
-                swtch(&(c->scheduler), p->context);
-                switchkvm();
-                c->proc = 0;
-            }
+        } else {
+            release(&ptable.lock);
+            continue;
         }
+
+        if(p->state != RUNNABLE) {
+            release(&ptable.lock);
+            continue;
+        }
+
+        c->proc = p;
+        switchuvm(p);
+        p->state = RUNNING;
+        swtch(&(c->scheduler), p->context);
+        switchkvm();
+
+        c->proc = 0;
         release(&ptable.lock);
     }
+    #elif defined(SCHEDULER_FIFO)
+  struct proc *p;
+  struct cpu *c = mycpu();
+  c->proc = 0;
 
-#elif defined(SCHEDULER_FIFO)
-    struct proc *p;
-    struct cpu *c = mycpu();
-    c->proc = 0;
+  for (;;) {
+      sti();
+      acquire(&ptable.lock);
+      //cprintf("incremented1\n");
+      // Get the first process in the queue
+      p = ptable.head;
+      //cprintf("incremented2\n");
+      if (p && p->state == RUNNABLE) {
+          // Dequeue the process
+          //ptable.head = p->next;
+          if (!ptable.head) ptable.tail = 0;  // If queue is empty, reset tail
 
-    for(;;) {
-        sti();
-        acquire(&ptable.lock);
+          c->proc = p;
+          switchuvm(p);
+          p->state = RUNNING;
 
-        // Update ready time for all RUNNABLE processes
-        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-            if(p->state == RUNNABLE) {
-                p->total_ready_time++;
+
+          //cprintf("FIFO: Running process %d (Arrival Time: %d)\n", p->pid, p->arrival_time);
+          
+          swtch(&(c->scheduler), p->context);  // Switch to process
+          switchkvm();
+          //cprintf("FIFO: Also Running process %d (Arrival Time: %d)\n", p->pid, p->arrival_time);
+          c->proc = 0;
+
+
+            if (p->state == ZOMBIE) {
+                cprintf("FIFO: Process %d exited, moving to next process.\n", p->pid);
             }
-        }
-
-        p = ptable.head;
-        if(p && p->state == RUNNABLE) {
-            if (!p->responded) {
-                p->start_time = ticks;
-                p->responded = 1;
-            }
-
-            c->proc = p;
-            switchuvm(p);
-            p->state = RUNNING;
-            p->total_run_time++;
-
-            swtch(&(c->scheduler), p->context);
-            switchkvm();
-            c->proc = 0;
-
-            if(p->state == ZOMBIE) {
-                p->completion_time = ticks;
-            }
-        }
-        release(&ptable.lock);
-    }
-
-#else
-    struct proc *p;
-    struct cpu *c = mycpu();
-    c->proc = 0;
-
-    for(;;) {
-        sti();
-        acquire(&ptable.lock);
-
-        // Update ready time for all RUNNABLE processes
-        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-            if(p->state == RUNNABLE) {
-                p->total_ready_time++;
-            }
-        }
-
-        for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-            if(p->state != RUNNABLE)
-                continue;
-
-            if (!p->responded) {
-                p->start_time = ticks;
-                p->responded = 1;
-            }
-
-            c->proc = p;
-            switchuvm(p);
-            p->state = RUNNING;
-            p->total_run_time++;
-
-            swtch(&(c->scheduler), p->context);
-            switchkvm();
-            c->proc = 0;
-        }
-        release(&ptable.lock);
-    }
-#endif
+      }else if(p&&p->next&&p->next->state==RUNNABLE){
+              ptable.head = p->next;
+      }
+    release(&ptable.lock);
+    if (!ptable.head) {
+            cprintf("All processes finished. Restarting shell...\n");
+            userinit();  
+            cprintf("Shell restarted!\n");
+  }
 }
+#else
+struct proc *p;
+struct cpu *c = mycpu();
+c->proc = 0;
+
+for(;;) {
+    sti();
+    acquire(&ptable.lock);
+
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if(p->state != RUNNABLE)
+            continue;
+        c->proc = p;
+        switchuvm(p);
+        p->state = RUNNING;
+
+        swtch(&(c->scheduler), p->context);
+        switchkvm();
+
+        c->proc = 0;
+    }
+
+    release(&ptable.lock);
+}
+#endif
+  }
 
 
 
@@ -802,7 +868,7 @@ sys_set_tickets(void) {
   }
 
   struct proc* p = myproc();
-  if (p == 0) { 
+  if (p == 0) {  // 确保进程有效
     return -1;
   }
 
@@ -820,7 +886,7 @@ int gettickets(int pid) {
   acquire(&ptable.lock);
   for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
     if (p->pid == pid) { 
-
+      // 确保状态是 RUNNABLE, RUNNING，并且进程不是 ZOMBIE
       if (p->state == RUNNABLE || p->state == RUNNING) {
         tickets_val = p->tickets;
       }
@@ -854,14 +920,5 @@ int job_position(int pid) {
   }
   release(&ptable.lock);
   return -1;  
-}
-
-
-uint uptime(void) {
-  uint xticks;
-  acquire(&tickslock);
-  xticks = ticks;
-  release(&tickslock);
-  return xticks;
 }
 

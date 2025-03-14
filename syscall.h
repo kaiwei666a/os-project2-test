@@ -24,4 +24,3 @@
 #define SYS_set_tickets 23
 #define SYS_get_tickets  24
 #define SYS_job_position 25
-

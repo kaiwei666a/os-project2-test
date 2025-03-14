@@ -221,8 +221,7 @@ UPROGS=\
 	_wc\
 	_zombie\
 	_find\
-	_test_ticks_run\
-	_scheduler_test
+	_test_ticks_run
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README OS611_example.txt OS611_EXAMPLE.txt $(UPROGS)

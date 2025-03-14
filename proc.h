@@ -51,14 +51,8 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   int tickets;
-  uint creation_time;        // When process was created
-  uint start_time;          // When process first started running
-  uint completion_time;     // When process completed
-  uint total_run_time;      // Total time spent running
-  uint total_ready_time;    // Total time spent ready
-  uint total_sleep_time;    // Total time spent sleeping
-  int responded;            // Whether process has started running
-  struct proc* next;        // Next process in queue (for FIFO)
+  uint enqueue_time;
+
 };
 
 
